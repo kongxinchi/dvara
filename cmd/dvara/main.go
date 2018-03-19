@@ -8,7 +8,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/facebookgo/dvara"
+	"github.com/kongxinchi/dvara"
 	"github.com/facebookgo/inject"
 	"github.com/facebookgo/startstop"
 	"github.com/facebookgo/stats"

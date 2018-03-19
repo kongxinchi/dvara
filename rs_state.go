@@ -12,6 +12,7 @@ import (
 )
 
 const errNotReplSet = "not running with --replSet"
+const errMongos = "replSetGetStatus is not supported through mongos"
 
 // ReplicaSetState is a snapshot of the RS configuration at some point in time.
 type ReplicaSetState struct {
@@ -39,7 +40,7 @@ func NewReplicaSetState(addr string) (*ReplicaSetState, error) {
 	var r ReplicaSetState
 	if r.lastRS, err = replSetGetStatus(session); err != nil {
 		// This error indicates we're in Single Node Mode. That's okay.
-		if err.Error() != errNotReplSet {
+		if err.Error() != errNotReplSet && err.Error() != errMongos{
 			return nil, err
 		}
 		r.singleAddr = addr
