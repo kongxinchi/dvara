@@ -28,25 +28,7 @@ func Main() error {
 	conf, err := dvara.InitConf(*configPath)
 
 
-	//messageTimeout := flag.Duration("message_timeout", 2*time.Minute, "timeout for one message to be proxied")
-	//clientIdleTimeout := flag.Duration("client_idle_timeout", time.Second, "idle timeout for client connections")
-	//serverIdleTimeout := flag.Duration("server_idle_timeout", 1*time.Hour, "idle timeout for  server connections")
-	//serverClosePoolSize := flag.Uint("server_close_pool_size", 100, "number of goroutines that will handle closing server connections")
-	//getLastErrorTimeout := flag.Duration("get_last_error_timeout", time.Minute, "timeout for getLastError pinning")
-	//maxPerClientConnections := flag.Uint("max_per_client_connections", 100, "maximum number of connections per client")
-	//maxConnections := flag.Uint("max_connections", 100, "maximum number of connections per mongo")
-	//portStart := flag.Int("port_start", 6000, "start of port range")
-	//portEnd := flag.Int("port_end", 6010, "end of port range")
-	//addrs := flag.String("addrs", "localhost:27017", "comma separated list of mongo addresses")
-	// TODO 从配置中获取监听端口，地址，用户名，密码
-
-
-
-
 	replicaSet := dvara.ReplicaSet{
-		//Addrs:                   *addrs,
-		//PortStart:               *portStart,
-		//PortEnd:                 *portEnd,
 		ProxyConfigs:            conf.ProxyConfigs,
 		MessageTimeout:          time.Duration(conf.MessageTimeout) * time.Second,
 		ClientIdleTimeout:       time.Duration(conf.ClientIdleTimeout) * time.Second,

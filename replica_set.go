@@ -41,22 +41,10 @@ var errNoAddrsGiven = errors.New("dvara: no seed addresses given for ReplicaSet"
 // different replica sets, it will be considered an error.
 type ReplicaSet struct {
 	Log                    Logger                  `inject:""`
-	ReplicaSetStateCreator *ReplicaSetStateCreator `inject:""`
 	ProxyQuery             *ProxyQuery             `inject:""`
 
 	// Stats if provided will be used to record interesting stats.
 	Stats stats.Client `inject:""`
-
-	// Comma separated list of mongo addresses. This is the list of "seed"
-	// servers, and one of two conditions must be met for each entry here -- it's
-	// either alive and part of the same replica set as all others listed, or is
-	// not reachable.
-	Addrs string
-
-	// PortStart and PortEnd define the port range within which proxies will be
-	// allocated.
-	PortStart int
-	PortEnd   int
 
 	// Maximum number of connections that will be established to each mongo node.
 	MaxConnections uint
@@ -97,44 +85,19 @@ type ReplicaSet struct {
 	// Proxy Map Configs
 	ProxyConfigs []ProxyConf
 
-	proxyToReal map[string]string
 	realToProxy map[string]string
-	ignoredReal map[string]ReplicaState
 	proxies     map[string]*Proxy
 	restarter   *sync.Once
-	lastState   *ReplicaSetState
 }
 
 // Start starts proxies to support this ReplicaSet.
 func (r *ReplicaSet) Start() error {
-	r.proxyToReal = make(map[string]string)
 	r.realToProxy = make(map[string]string)
-	r.ignoredReal = make(map[string]ReplicaState)
 	r.proxies = make(map[string]*Proxy)
 
 	if len(r.ProxyConfigs) == 0 {
 		return errNoAddrsGiven
 	}
-
-	//rawAddrs := strings.Split(r.Addrs, ",")
-	//var err error
-	//r.lastState, err = r.ReplicaSetStateCreator.FromAddrs(rawAddrs, r.Name)
-	//if err != nil {
-	//	return err
-	//}
-	//
-	//healthyAddrs := r.lastState.Addrs()
-	//healthyAddrs := rawAddrs
-
-	// Ensure we have at least one health address.
-	//if len(healthyAddrs) == 0 {
-	//	return stackerr.Newf("no healthy primaries or secondaries: %s", r.Addrs)
-	//}
-
-	// Add discovered nodes to seed address list. Over time if the original seed
-	// nodes have gone away and new nodes have joined this ensures that we'll
-	// still be able to connect.
-	//r.Addrs = strings.Join(uniq(append(rawAddrs, healthyAddrs...)), ",")
 
 	r.restarter = new(sync.Once)
 
@@ -148,7 +111,7 @@ func (r *ReplicaSet) Start() error {
 			Log:            r.Log,
 			ReplicaSet:     r,
 			ClientListener: listener,
-			ProxyAddr:      r.proxyAddr(listener),
+			ProxyAddr:      pc.Listen,
 			MongoAddr:      pc.Server,
 			Username:		pc.Username,
 			Password:		pc.Password,
@@ -157,15 +120,6 @@ func (r *ReplicaSet) Start() error {
 			return err
 		}
 	}
-
-	// add the ignored hosts, unless lastRS is nil (single node mode)
-	//if r.lastState.lastRS != nil {
-	//	for _, member := range r.lastState.lastRS.Members {
-	//		if _, ok := r.realToProxy[member.Name]; !ok {
-	//			r.ignoredReal[member.Name] = member.State
-	//		}
-	//	}
-	//}
 
 	var wg sync.WaitGroup
 	wg.Add(len(r.proxies))
@@ -306,27 +260,11 @@ func (r *ReplicaSet) add(p *Proxy) error {
 func (r *ReplicaSet) Proxy(h string) (string, error) {
 	p, ok := r.realToProxy[h]
 	if !ok {
-		if s, ok := r.ignoredReal[h]; ok {
-			return "", &ProxyMapperError{
-				RealHost: h,
-				State:    s,
-			}
-		}
 		return "", fmt.Errorf("mongo %s is not in ReplicaSet", h)
 	}
 	return p, nil
 }
 
-// SameRS checks if the given replSetGetStatusResponse is the same as the last
-// state.
-func (r *ReplicaSet) SameRS(o *replSetGetStatusResponse) bool {
-	return r.lastState.SameRS(o)
-}
-
-// SameIM checks if the given isMasterResponse is the same as the last state.
-func (r *ReplicaSet) SameIM(o *isMasterResponse) bool {
-	return r.lastState.SameIM(o)
-}
 
 // ProxyMapperError occurs when a known host is being ignored and does not have
 // a corresponding proxy address.

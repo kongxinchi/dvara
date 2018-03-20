@@ -155,10 +155,6 @@ func (h *Harness) ProxySession() *mgo.Session {
 	return h.Dial(h.ReplicaSet.ProxyMembers()[0])
 }
 
-func (h *Harness) RealSession() *mgo.Session {
-	return h.Dial(h.ReplicaSet.lastState.Addrs()[0])
-}
-
 func (h *Harness) Dial(u string) *mgo.Session {
 	session, err := mgo.Dial(u)
 	ensure.Nil(h.T, err, u)
