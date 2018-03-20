@@ -352,9 +352,9 @@ func (r *IsMasterResponseRewriter) Rewrite(client io.Writer, server io.Reader) e
 	if err != nil {
 		return err
 	}
-	if !r.ReplicaStateCompare.SameIM(&q) {
-		return errRSChanged
-	}
+	//if !r.ReplicaStateCompare.SameIM(&q) {
+	//	return errRSChanged
+	//}
 
 	var newHosts []string
 	for _, h := range q.Hosts {
@@ -417,9 +417,9 @@ func (r *ReplSetGetStatusResponseRewriter) Rewrite(client io.Writer, server io.R
 	if err != nil {
 		return err
 	}
-	if !r.ReplicaStateCompare.SameRS(&q) {
-		return errRSChanged
-	}
+	//if !r.ReplicaStateCompare.SameRS(&q) {
+	//	return errRSChanged
+	//}
 
 	var newMembers []statusMember
 	for _, m := range q.Members {

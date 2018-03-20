@@ -94,6 +94,9 @@ type ReplicaSet struct {
 	// will be used
 	Name string
 
+	// Proxy Map Configs
+	ProxyConfigs []ProxyConf
+
 	proxyToReal map[string]string
 	realToProxy map[string]string
 	ignoredReal map[string]ReplicaState
@@ -109,33 +112,34 @@ func (r *ReplicaSet) Start() error {
 	r.ignoredReal = make(map[string]ReplicaState)
 	r.proxies = make(map[string]*Proxy)
 
-	if r.Addrs == "" {
+	if len(r.ProxyConfigs) == 0 {
 		return errNoAddrsGiven
 	}
 
-	rawAddrs := strings.Split(r.Addrs, ",")
-	var err error
-	r.lastState, err = r.ReplicaSetStateCreator.FromAddrs(rawAddrs, r.Name)
-	if err != nil {
-		return err
-	}
-
-	healthyAddrs := r.lastState.Addrs()
+	//rawAddrs := strings.Split(r.Addrs, ",")
+	//var err error
+	//r.lastState, err = r.ReplicaSetStateCreator.FromAddrs(rawAddrs, r.Name)
+	//if err != nil {
+	//	return err
+	//}
+	//
+	//healthyAddrs := r.lastState.Addrs()
+	//healthyAddrs := rawAddrs
 
 	// Ensure we have at least one health address.
-	if len(healthyAddrs) == 0 {
-		return stackerr.Newf("no healthy primaries or secondaries: %s", r.Addrs)
-	}
+	//if len(healthyAddrs) == 0 {
+	//	return stackerr.Newf("no healthy primaries or secondaries: %s", r.Addrs)
+	//}
 
 	// Add discovered nodes to seed address list. Over time if the original seed
 	// nodes have gone away and new nodes have joined this ensures that we'll
 	// still be able to connect.
-	r.Addrs = strings.Join(uniq(append(rawAddrs, healthyAddrs...)), ",")
+	//r.Addrs = strings.Join(uniq(append(rawAddrs, healthyAddrs...)), ",")
 
 	r.restarter = new(sync.Once)
 
-	for _, addr := range healthyAddrs {
-		listener, err := r.newListener()
+	for _, pc := range r.ProxyConfigs {
+		listener, err := r.newListener(pc.Listen)
 		if err != nil {
 			return err
 		}
@@ -145,7 +149,9 @@ func (r *ReplicaSet) Start() error {
 			ReplicaSet:     r,
 			ClientListener: listener,
 			ProxyAddr:      r.proxyAddr(listener),
-			MongoAddr:      addr,
+			MongoAddr:      pc.Server,
+			Username:		pc.Username,
+			Password:		pc.Password,
 		}
 		if err := r.add(p); err != nil {
 			return err
@@ -153,13 +159,13 @@ func (r *ReplicaSet) Start() error {
 	}
 
 	// add the ignored hosts, unless lastRS is nil (single node mode)
-	if r.lastState.lastRS != nil {
-		for _, member := range r.lastState.lastRS.Members {
-			if _, ok := r.realToProxy[member.Name]; !ok {
-				r.ignoredReal[member.Name] = member.State
-			}
-		}
-	}
+	//if r.lastState.lastRS != nil {
+	//	for _, member := range r.lastState.lastRS.Members {
+	//		if _, ok := r.realToProxy[member.Name]; !ok {
+	//			r.ignoredReal[member.Name] = member.State
+	//		}
+	//	}
+	//}
 
 	var wg sync.WaitGroup
 	wg.Add(len(r.proxies))
@@ -276,30 +282,20 @@ func (r *ReplicaSet) proxyHostname() string {
 	return home
 }
 
-func (r *ReplicaSet) newListener() (net.Listener, error) {
-	for i := r.PortStart; i <= r.PortEnd; i++ {
-		listener, err := net.Listen("tcp", fmt.Sprintf(":%d", i))
-		if err == nil {
-			return listener, nil
-		}
+func (r *ReplicaSet) newListener(address string) (net.Listener, error) {
+	listener, err := net.Listen("tcp", address)
+	if err == nil {
+		return listener, nil
 	}
-	return nil, fmt.Errorf(
-		"could not find a free port in range %d-%d",
-		r.PortStart,
-		r.PortEnd,
-	)
+	return nil, fmt.Errorf("could not listen: %s", address)
 }
 
 // add a proxy/mongo mapping.
 func (r *ReplicaSet) add(p *Proxy) error {
-	if _, ok := r.proxyToReal[p.ProxyAddr]; ok {
-		return fmt.Errorf("proxy %s already used in ReplicaSet", p.ProxyAddr)
-	}
 	if _, ok := r.realToProxy[p.MongoAddr]; ok {
 		return fmt.Errorf("mongo %s already exists in ReplicaSet", p.MongoAddr)
 	}
 	r.Log.Infof("added %s", p)
-	r.proxyToReal[p.ProxyAddr] = p.MongoAddr
 	r.realToProxy[p.MongoAddr] = p.ProxyAddr
 	r.proxies[p.ProxyAddr] = p
 	return nil
@@ -319,15 +315,6 @@ func (r *ReplicaSet) Proxy(h string) (string, error) {
 		return "", fmt.Errorf("mongo %s is not in ReplicaSet", h)
 	}
 	return p, nil
-}
-
-// ProxyMembers returns the list of proxy members in this ReplicaSet.
-func (r *ReplicaSet) ProxyMembers() []string {
-	members := make([]string, 0, len(r.proxyToReal))
-	for r := range r.proxyToReal {
-		members = append(members, r)
-	}
-	return members
 }
 
 // SameRS checks if the given replSetGetStatusResponse is the same as the last

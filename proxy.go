@@ -12,6 +12,7 @@ import (
 
 	"github.com/facebookgo/rpool"
 	"github.com/facebookgo/stats"
+	"github.com/kongxinchi/dvara/auth"
 )
 
 const headerLen = 16
@@ -32,6 +33,9 @@ type Proxy struct {
 	ClientListener net.Listener // Listener for incoming client connections
 	ProxyAddr      string       // Address for incoming client connections
 	MongoAddr      string       // Address for destination Mongo server
+
+	Username	   string
+	Password	   string
 
 	wg                      sync.WaitGroup
 	closed                  chan struct{}
@@ -110,21 +114,13 @@ func (p *Proxy) stop(hard bool) error {
 	return nil
 }
 
-func (p *Proxy) checkRSChanged() bool {
-	addrs := p.ReplicaSet.lastState.Addrs()
-	r, err := p.ReplicaSet.ReplicaSetStateCreator.FromAddrs(addrs, p.ReplicaSet.Name)
+func (p *Proxy) AuthConn(conn net.Conn) error {
+	socket := auth.NewMongoSocket(conn)
+	err := socket.Login(auth.Credential{Username: p.Username, Password: p.Password, Source: "admin"})
 	if err != nil {
-		p.Log.Errorf("all nodes possibly down?: %s", err)
-		return true
+		return err
 	}
-
-	if err := r.AssertEqual(p.ReplicaSet.lastState); err != nil {
-		p.Log.Error(err)
-		go p.ReplicaSet.Restart()
-		return true
-	}
-
-	return false
+	return nil
 }
 
 // Open up a new connection to the server. Retry 7 times, doubling the sleep
@@ -135,14 +131,16 @@ func (p *Proxy) newServerConn() (io.Closer, error) {
 	for retryCount := 7; retryCount > 0; retryCount-- {
 		c, err := net.Dial("tcp", p.MongoAddr)
 		if err == nil {
-			return c, nil
+			if len(p.Username) == 0 {
+				return c, nil
+			}
+			err = p.AuthConn(c)
+			if err == nil {
+				return c, nil
+			}
 		}
 		p.Log.Error(err)
 
-		// abort if rs changed
-		if p.checkRSChanged() {
-			return nil, errNormalClose
-		}
 		time.Sleep(retrySleep)
 		retrySleep = retrySleep * 2
 	}
