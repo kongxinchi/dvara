@@ -14,6 +14,8 @@ type Conf struct {
 	MaxPerClientConnections uint        `yaml:"max_per_client_connections"`
 	MaxConnections          uint        `yaml:"max_connections"`
 	ProxyConfigs            []ProxyConf `yaml:"proxies"`
+	LogFile                 string      `ymal:"logfile"`
+	LogLevel                string      `ymal:"loglevel"`
 }
 
 type ProxyConf struct {

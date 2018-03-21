@@ -85,7 +85,7 @@ func (p *ProxyQuery) Proxy(
 		}
 
 		p.Log.Debugf(
-			"buffered OpQuery for %s: %s",
+			"buffered OpQuery for %s: \n%s",
 			fullCollectionName[:len(fullCollectionName)-1],
 			spew.Sdump(q),
 		)

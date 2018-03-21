@@ -115,7 +115,11 @@ func (p *Proxy) stop(hard bool) error {
 }
 
 func (p *Proxy) AuthConn(conn net.Conn) error {
-	socket := auth.NewMongoSocket(conn)
+	socket := &auth.MongoSocket{
+		Log: p.Log,
+		Conn: conn,
+		Addr: p.MongoAddr,
+	}
 	err := socket.Login(auth.Credential{Username: p.Username, Password: p.Password, Source: "admin"})
 	if err != nil {
 		return err

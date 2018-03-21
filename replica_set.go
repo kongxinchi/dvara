@@ -24,8 +24,8 @@ var hardRestart = flag.Bool(
 type Logger interface {
 	Error(args ...interface{})
 	Errorf(format string, args ...interface{})
-	Warn(args ...interface{})
-	Warnf(format string, args ...interface{})
+	Warning(args ...interface{})
+	Warningf(format string, args ...interface{})
 	Info(args ...interface{})
 	Infof(format string, args ...interface{})
 	Debug(args ...interface{})
@@ -232,7 +232,7 @@ func (r *ReplicaSet) proxyHostname() string {
 			}
 		}
 	}
-	r.Log.Warnf("hostname %s doesn't resolve to the current host", hostname)
+	r.Log.Warningf("hostname %s doesn't resolve to the current host", hostname)
 	return home
 }
 

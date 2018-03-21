@@ -1,0 +1,35 @@
+
+# timeout for one message to be proxied
+message_timeout: 120
+
+# idle timeout for client connections
+client_idle_timeout: 3600
+
+# idle timeout for server connections
+server_idle_timeout: 3600
+
+# number of goroutines that will handle closing server connections
+server_close_pool_size: 100
+
+# timeout for getLastError pinning
+get_last_error_timeout: 60
+
+# maximum number of connections per client
+max_per_client_connections: 100
+
+# maximum number of connections per mongo
+max_connections: 100
+
+# logfile location
+logfile: dvara.log
+
+# log level CRITICAL/ERROR/WARNING/NOTICE/INFO/DEBUG
+loglevel: INFO
+
+# proxies mappings
+proxies:
+  -
+    listen: 127.0.0.1:27017
+    server: 192.168.33.10:27017
+    username:
+    password:

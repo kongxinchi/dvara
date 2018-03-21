@@ -7,11 +7,13 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+	"log"
 
 	"github.com/kongxinchi/dvara"
 	"github.com/facebookgo/inject"
 	"github.com/facebookgo/startstop"
 	"github.com/facebookgo/stats"
+	"github.com/op/go-logging"
 )
 
 func main() {
@@ -21,14 +23,39 @@ func main() {
 	}
 }
 
+func InitLogger(conf *dvara.Conf) (*logging.Logger, error) {
+	logger := logging.MustGetLogger("dvara")
+
+	logLevel, err := logging.LogLevel(conf.LogLevel)
+	if err != nil {
+		return nil, err
+	}
+
+	logFile := conf.LogFile
+	logIO, err := os.OpenFile(logFile, os.O_RDWR|os.O_APPEND|os.O_CREATE, os.ModeType)
+	if err != nil {
+		return nil, err
+	}
+
+	backend := logging.NewLogBackend(logIO, "", log.Ldate | log.Lmicroseconds)
+	backendLeveled := logging.AddModuleLevel(backend)
+	backendLeveled.SetLevel(logLevel, "")
+	logger.SetBackend(backendLeveled)
+	return logger, nil
+}
+
 func Main() error {
 	configPath := flag.String("config", "", "config file path")
 	flag.Parse()
 
 	conf, err := dvara.InitConf(*configPath)
 
+	logger, err := InitLogger(conf)
+	if err != nil {
+		return err
+	}
 
-	replicaSet := dvara.ReplicaSet{
+	replicaSet := dvara.ReplicaSet {
 		ProxyConfigs:            conf.ProxyConfigs,
 		MessageTimeout:          time.Duration(conf.MessageTimeout) * time.Second,
 		ClientIdleTimeout:       time.Duration(conf.ClientIdleTimeout) * time.Second,
@@ -40,10 +67,10 @@ func Main() error {
 	}
 
 	var statsClient stats.HookClient
-	var log stdLogger
+
 	var graph inject.Graph
 	err = graph.Provide(
-		&inject.Object{Value: &log},
+		&inject.Object{Value: logger},
 		&inject.Object{Value: &replicaSet},
 		&inject.Object{Value: &statsClient},
 	)
@@ -55,10 +82,10 @@ func Main() error {
 	}
 	objects := graph.Objects()
 
-	if err := startstop.Start(objects, &log); err != nil {
+	if err := startstop.Start(objects, logger); err != nil {
 		return err
 	}
-	defer startstop.Stop(objects, &log)
+	defer startstop.Stop(objects, logger)
 
 	ch := make(chan os.Signal, 2)
 	signal.Notify(ch, syscall.SIGTERM, syscall.SIGINT)

@@ -29,13 +29,15 @@ import (
 	"fmt"
 	"net"
 	"gopkg.in/mgo.v2/bson"
+	"github.com/davecgh/go-spew/spew"
 )
 
 type replyFunc func(err error, reply *replyOp, docNum int, docData []byte)
 
-type mongoSocket struct {
-	conn          net.Conn
-	addr          string // For debugging only.
+type MongoSocket struct {
+	Log  Logger
+	Conn net.Conn
+	Addr string
 }
 
 type queryOp struct {
@@ -55,16 +57,12 @@ type replyOp struct {
 	replyDocs int32
 }
 
-func NewMongoSocket(conn net.Conn) *mongoSocket  {
-	return &mongoSocket{conn:conn}
-}
-
-func (socket *mongoSocket) kill(err error, abend bool) {
+func (socket *MongoSocket) kill(err error, abend bool) {
 	fmt.Printf("WARN: Killing socket: %s, with error: %s, and abend:%s \n", socket, err, abend)
-	socket.conn.Close()
+	socket.Conn.Close()
 }
 
-func (socket *mongoSocket) Query(op *queryOp) (err error) {
+func (socket *MongoSocket) Query(op *queryOp) (err error) {
 
 	buf := make([]byte, 0, 256)
 
@@ -84,9 +82,9 @@ func (socket *mongoSocket) Query(op *queryOp) (err error) {
 
 	setInt32(buf, start, int32(len(buf)-start))
 
-	_, err = socket.conn.Write(buf)
+	_, err = socket.Conn.Write(buf)
 	p := make([]byte, 36) // 16 from header + 20 from OP_REPLY fixed fields
-	fill(socket.conn, p)
+	fill(socket.Conn, p)
 
 	reply := replyOp{
 		flags:     uint32(getInt32(p, 16)),
@@ -100,7 +98,7 @@ func (socket *mongoSocket) Query(op *queryOp) (err error) {
 	} else {
 		s := make([]byte, 4)
 		for i := 0; i != int(reply.replyDocs); i++ {
-			err = fill(socket.conn, s)
+			err = fill(socket.Conn, s)
 			if err != nil {
 				if replyFunc != nil {
 					replyFunc(err, nil, -1, nil)
@@ -117,7 +115,7 @@ func (socket *mongoSocket) Query(op *queryOp) (err error) {
 			b[2] = s[2]
 			b[3] = s[3]
 
-			err = fill(socket.conn, b[4:])
+			err = fill(socket.Conn, b[4:])
 			if err != nil {
 				if replyFunc != nil {
 					replyFunc(err, nil, -1, nil)
@@ -128,7 +126,10 @@ func (socket *mongoSocket) Query(op *queryOp) (err error) {
 
 			m := bson.M{}
 			if err := bson.Unmarshal(b, m); err == nil {
-				fmt.Printf("Socket %p to %s: received document: %#v\n", socket, socket.addr, m)
+				socket.Log.Debugf(
+					"Socket %p to %s: received document: \n%s",
+					socket, socket.Addr, spew.Sdump(m),
+				)
 			}
 
 			if replyFunc != nil {

@@ -34,6 +34,18 @@ import (
 	"gopkg.in/mgo.v2/bson"
 )
 
+// Logger allows for simple text logging.
+type Logger interface {
+	Error(args ...interface{})
+	Errorf(format string, args ...interface{})
+	Warning(args ...interface{})
+	Warningf(format string, args ...interface{})
+	Info(args ...interface{})
+	Infof(format string, args ...interface{})
+	Debug(args ...interface{})
+	Debugf(format string, args ...interface{})
+}
+
 // Credential holds details to authenticate with a MongoDB server.
 type Credential struct {
 	// Username and Password hold the basic details for authentication.
@@ -98,14 +110,14 @@ type saslResult struct {
 	ErrMsg         string
 }
 
-func (socket *mongoSocket) Login(cred Credential) error {
+func (socket *MongoSocket) Login(cred Credential) error {
 	if cred.Mechanism == "" {
 		cred.Mechanism = "SCRAM-SHA-1"
 	}
 	return socket.loginSASL(cred)
 }
 
-func (socket *mongoSocket) loginSASL(cred Credential) error {
+func (socket *MongoSocket) loginSASL(cred Credential) error {
 	sasl := saslNewScram(cred)
 	defer sasl.Close()
 
@@ -147,7 +159,7 @@ func (socket *mongoSocket) loginSASL(cred Credential) error {
 	return nil
 }
 
-func (socket *mongoSocket) loginRun(db string, query, result interface{}, f func() error) error {
+func (socket *MongoSocket) loginRun(db string, query, result interface{}, f func() error) error {
 	var replyErr error
 
 	op := queryOp{}
