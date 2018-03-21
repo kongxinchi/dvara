@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/facebookgo/stackerr"
-	"github.com/facebookgo/stats"
 	"github.com/op/go-logging"
 )
 
@@ -44,9 +43,6 @@ var errNoAddrsGiven = errors.New("dvara: no seed addresses given for ReplicaSet"
 type ReplicaSet struct {
 	Log        Logger      `inject:""`
 	ProxyQuery *ProxyQuery `inject:""`
-
-	// Stats if provided will be used to record interesting stats.
-	Stats stats.Client `inject:""`
 
 	// Maximum number of connections that will be established to each mongo node.
 	MaxConnections uint

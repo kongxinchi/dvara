@@ -12,7 +12,6 @@ import (
 	"github.com/kongxinchi/dvara"
 	"github.com/facebookgo/inject"
 	"github.com/facebookgo/startstop"
-	"github.com/facebookgo/stats"
 	"github.com/op/go-logging"
 )
 
@@ -66,13 +65,10 @@ func Main() error {
 		MaxPerClientConnections: conf.MaxPerClientConnections,
 	}
 
-	var statsClient stats.HookClient
-
 	var graph inject.Graph
 	err = graph.Provide(
 		&inject.Object{Value: logger},
 		&inject.Object{Value: &replicaSet},
-		&inject.Object{Value: &statsClient},
 	)
 	if err != nil {
 		return err

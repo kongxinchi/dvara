@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/facebookgo/rpool"
-	"github.com/facebookgo/stats"
 	"github.com/kongxinchi/dvara/auth"
 )
 
@@ -40,7 +39,6 @@ type Proxy struct {
 	wg                      sync.WaitGroup
 	closed                  chan struct{}
 	serverPool              rpool.Pool
-	stats                   stats.Client
 	maxPerClientConnections *maxPerClientConnections
 }
 
@@ -67,29 +65,6 @@ func (p *Proxy) Start() error {
 		MinIdle:           p.ReplicaSet.MinIdleConnections,
 		IdleTimeout:       p.ReplicaSet.ServerIdleTimeout,
 		ClosePoolSize:     p.ReplicaSet.ServerClosePoolSize,
-	}
-
-	// plug stats if we can
-	if p.ReplicaSet.Stats != nil {
-		// Drop the default port suffix to make them pretty in production.
-		dbName := strings.TrimSuffix(p.MongoAddr, ":27017")
-
-		// We want 2 sets of keys, one specific to the proxy, and another shared
-		// with others.
-		p.serverPool.Stats = stats.PrefixClient(
-			[]string{
-				"mongoproxy.server.pool.",
-				fmt.Sprintf("mongoproxy.%s.server.pool.", dbName),
-			},
-			p.ReplicaSet.Stats,
-		)
-		p.stats = stats.PrefixClient(
-			[]string{
-				"mongoproxy.",
-				fmt.Sprintf("mongoproxy.%s.", dbName),
-			},
-			p.ReplicaSet.Stats,
-		)
 	}
 
 	go p.clientAcceptLoop()
@@ -180,7 +155,6 @@ func (p *Proxy) proxyMessage(
 	// OpQuery may need to be transformed and need special handling in order to
 	// make the proxy transparent.
 	if h.OpCode == OpQuery {
-		stats.BumpSum(p.stats, "message.with.response", 1)
 		return p.ReplicaSet.ProxyQuery.Proxy(h, client, server)
 	}
 
@@ -197,7 +171,6 @@ func (p *Proxy) proxyMessage(
 
 	// For Ops with responses we proxy the raw response message over.
 	if h.OpCode.HasResponse() {
-		stats.BumpSum(p.stats, "message.with.response", 1)
 		if err := copyMessage(client, server); err != nil {
 			p.Log.Error(err)
 			return err
@@ -233,7 +206,6 @@ func (p *Proxy) clientServeLoop(c net.Conn) {
 	// enforce per-client max connection limit
 	if p.maxPerClientConnections.inc(remoteIP) {
 		c.Close()
-		stats.BumpSum(p.stats, "client.rejected.max.connections", 1)
 		p.Log.Errorf("rejecting client connection due to max connections limit: %s", remoteIP)
 		return
 	}
@@ -247,7 +219,6 @@ func (p *Proxy) clientServeLoop(c net.Conn) {
 
 	c = teeIf(fmt.Sprintf("client %s <=> %s", c.RemoteAddr(), p), c)
 	p.Log.Infof("client %s connected to %s", c.RemoteAddr(), p)
-	stats.BumpSum(p.stats, "client.connected", 1)
 	defer func() {
 		p.Log.Infof("client %s disconnected from %s", c.RemoteAddr(), p)
 		p.wg.Done()
@@ -266,7 +237,6 @@ func (p *Proxy) clientServeLoop(c net.Conn) {
 			return
 		}
 
-		mpt := stats.BumpTime(p.stats, "message.proxy.time")
 		serverConn, err := p.getServerConn()
 		if err != nil {
 			if err != errNormalClose {
@@ -275,28 +245,14 @@ func (p *Proxy) clientServeLoop(c net.Conn) {
 			return
 		}
 
-		scht := stats.BumpTime(p.stats, "server.conn.held.time")
-
 		err = p.proxyMessage(h, c, serverConn)
 		if err != nil {
 			p.serverPool.Discard(serverConn)
 			p.Log.Error(err)
-			stats.BumpSum(p.stats, "message.proxy.error", 1)
-			if ne, ok := err.(net.Error); ok && ne.Timeout() {
-				stats.BumpSum(p.stats, "message.proxy.timeout", 1)
-			}
-			if err == errRSChanged {
-				go p.ReplicaSet.Restart()
-			}
 			return
 		}
 
-		// One message was proxied, stop it's timer.
-		mpt.End()
-
 		p.serverPool.Release(serverConn)
-		scht.End()
-		stats.BumpSum(p.stats, "message.proxy.success", 1)
 	}
 }
 
@@ -305,14 +261,10 @@ func (p *Proxy) clientServeLoop(c net.Conn) {
 // wait for MessageTimeout when closing even when we're idling.
 func (p *Proxy) idleClientReadHeader(c net.Conn) (*messageHeader, error) {
 	h, err := p.clientReadHeader(c, p.ReplicaSet.ClientIdleTimeout)
-	if err == errClientReadTimeout {
-		stats.BumpSum(p.stats, "client.idle.timeout", 1)
-	}
 	return h, err
 }
 
 func (p *Proxy) clientReadHeader(c net.Conn, timeout time.Duration) (*messageHeader, error) {
-	t := stats.BumpTime(p.stats, "client.read.header.time")
 	type headerError struct {
 		header *messageHeader
 		error  error
@@ -339,27 +291,23 @@ func (p *Proxy) clientReadHeader(c net.Conn, timeout time.Duration) (*messageHea
 
 	// Successfully read a header.
 	if response.error == nil {
-		t.End()
 		return response.header, nil
 	}
 
 	// Client side disconnected.
 	if response.error == io.EOF {
-		stats.BumpSum(p.stats, "client.clean.disconnect", 1)
 		return nil, errNormalClose
 	}
 
 	// We hit our ReadDeadline.
 	if ne, ok := response.error.(net.Error); ok && ne.Timeout() {
 		if closed {
-			stats.BumpSum(p.stats, "client.clean.disconnect", 1)
 			return nil, errNormalClose
 		}
 		return nil, errClientReadTimeout
 	}
 
 	// Some other unknown error.
-	stats.BumpSum(p.stats, "client.error.disconnect", 1)
 	p.Log.Error(response.error)
 	return nil, response.error
 }
