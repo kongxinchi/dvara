@@ -12,6 +12,7 @@ import (
 
 	"github.com/facebookgo/stackerr"
 	"github.com/facebookgo/stats"
+	"github.com/op/go-logging"
 )
 
 var hardRestart = flag.Bool(
@@ -30,6 +31,7 @@ type Logger interface {
 	Infof(format string, args ...interface{})
 	Debug(args ...interface{})
 	Debugf(format string, args ...interface{})
+	IsEnabledFor(level logging.Level) bool
 }
 
 var errNoAddrsGiven = errors.New("dvara: no seed addresses given for ReplicaSet")
@@ -40,8 +42,8 @@ var errNoAddrsGiven = errors.New("dvara: no seed addresses given for ReplicaSet"
 // they are reachable. That is, if two of the addresses are members of
 // different replica sets, it will be considered an error.
 type ReplicaSet struct {
-	Log                    Logger                  `inject:""`
-	ProxyQuery             *ProxyQuery             `inject:""`
+	Log        Logger      `inject:""`
+	ProxyQuery *ProxyQuery `inject:""`
 
 	// Stats if provided will be used to record interesting stats.
 	Stats stats.Client `inject:""`

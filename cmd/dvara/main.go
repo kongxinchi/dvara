@@ -30,6 +30,7 @@ func InitLogger(conf *dvara.Conf) (*logging.Logger, error) {
 	if err != nil {
 		return nil, err
 	}
+	logging.SetLevel(logLevel, "dvara")
 
 	logFile := conf.LogFile
 	logIO, err := os.OpenFile(logFile, os.O_RDWR|os.O_APPEND|os.O_CREATE, os.ModeType)

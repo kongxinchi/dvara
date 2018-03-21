@@ -32,6 +32,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"gopkg.in/mgo.v2/bson"
+	"github.com/op/go-logging"
 )
 
 // Logger allows for simple text logging.
@@ -44,6 +45,7 @@ type Logger interface {
 	Infof(format string, args ...interface{})
 	Debug(args ...interface{})
 	Debugf(format string, args ...interface{})
+	IsEnabledFor(level logging.Level) bool
 }
 
 // Credential holds details to authenticate with a MongoDB server.

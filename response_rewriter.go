@@ -11,6 +11,7 @@ import (
 
 	"github.com/davecgh/go-spew/spew"
 	"gopkg.in/mgo.v2/bson"
+	"github.com/op/go-logging"
 )
 
 var (
@@ -84,11 +85,13 @@ func (p *ProxyQuery) Proxy(
 			return err
 		}
 
-		p.Log.Debugf(
-			"buffered OpQuery for %s: \n%s",
-			fullCollectionName[:len(fullCollectionName)-1],
-			spew.Sdump(q),
-		)
+		if p.Log.IsEnabledFor(logging.DEBUG) {
+			p.Log.Debugf(
+				"buffered OpQuery for %s: \n%s",
+				fullCollectionName[:len(fullCollectionName)-1],
+				spew.Sdump(q),
+			)
+		}
 
 		if hasKey(q, "getLastError") {
 			return p.GetLastErrorRewriter.Rewrite(
@@ -119,14 +122,10 @@ func (p *ProxyQuery) Proxy(
 		lastError.Reset()
 	}
 
-	var written int
-	for _, b := range parts {
-		n, err := server.Write(b)
-		if err != nil {
-			p.Log.Error(err)
-			return err
-		}
-		written += n
+	written, err := server.Write(bytes.Join(parts, []byte("")))
+	if err != nil {
+		p.Log.Error(err)
+		return err
 	}
 
 	pending := int64(h.MessageLength) - int64(written)
@@ -185,14 +184,10 @@ func (r *GetLastErrorRewriter) Rewrite(
 	if !lastError.Exists() {
 		// We're going to be performing a real getLastError query and caching the
 		// response.
-		var written int
-		for _, b := range parts {
-			n, err := server.Write(b)
-			if err != nil {
-				r.Log.Error(err)
-				return err
-			}
-			written += n
+		written, err := server.Write(bytes.Join(parts, []byte("")))
+		if err != nil {
+			r.Log.Error(err)
+			return err
 		}
 
 		pending := int64(h.MessageLength) - int64(written)
@@ -201,7 +196,6 @@ func (r *GetLastErrorRewriter) Rewrite(
 			return err
 		}
 
-		var err error
 		if lastError.header, err = readHeader(server); err != nil {
 			r.Log.Error(err)
 			return err
@@ -383,9 +377,9 @@ type replSetGetStatusResponse struct {
 
 // ReplSetGetStatusResponseRewriter rewrites the "replSetGetStatus" response.
 type ReplSetGetStatusResponseRewriter struct {
-	Log                 Logger              `inject:""`
-	ProxyMapper         ProxyMapper         `inject:""`
-	ReplyRW             *ReplyRW            `inject:""`
+	Log         Logger      `inject:""`
+	ProxyMapper ProxyMapper `inject:""`
+	ReplyRW     *ReplyRW    `inject:""`
 }
 
 // Rewrite rewrites the "replSetGetStatus" response.
