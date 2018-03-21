@@ -11,9 +11,6 @@ server_idle_timeout: 3600
 # number of goroutines that will handle closing server connections
 server_close_pool_size: 100
 
-# timeout for getLastError pinning
-get_last_error_timeout: 1
-
 # maximum number of connections per client
 max_per_client_connections: 100
 

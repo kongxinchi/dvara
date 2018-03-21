@@ -170,7 +170,6 @@ func (p *Proxy) proxyMessage(
 	h *messageHeader,
 	client net.Conn,
 	server net.Conn,
-	lastError *LastError,
 ) error {
 
 	p.Log.Debugf("proxying message %s from %s for %s", h, client.RemoteAddr(), p)
@@ -182,14 +181,7 @@ func (p *Proxy) proxyMessage(
 	// make the proxy transparent.
 	if h.OpCode == OpQuery {
 		stats.BumpSum(p.stats, "message.with.response", 1)
-		return p.ReplicaSet.ProxyQuery.Proxy(h, client, server, lastError)
-	}
-
-	// Anything besides a getlasterror call (which requires an OpQuery) resets
-	// the lastError.
-	if lastError.Exists() {
-		p.Log.Debug("reset getLastError cache")
-		lastError.Reset()
+		return p.ReplicaSet.ProxyQuery.Proxy(h, client, server)
 	}
 
 	// For other Ops we proxy the header & raw body over.
@@ -265,7 +257,6 @@ func (p *Proxy) clientServeLoop(c net.Conn) {
 		p.maxPerClientConnections.dec(remoteIP)
 	}()
 
-	var lastError LastError
 	for {
 		h, err := p.idleClientReadHeader(c)
 		if err != nil {
@@ -285,53 +276,24 @@ func (p *Proxy) clientServeLoop(c net.Conn) {
 		}
 
 		scht := stats.BumpTime(p.stats, "server.conn.held.time")
-		for {
-			err := p.proxyMessage(h, c, serverConn, &lastError)
-			if err != nil {
-				p.serverPool.Discard(serverConn)
-				p.Log.Error(err)
-				stats.BumpSum(p.stats, "message.proxy.error", 1)
-				if ne, ok := err.(net.Error); ok && ne.Timeout() {
-					stats.BumpSum(p.stats, "message.proxy.timeout", 1)
-				}
-				if err == errRSChanged {
-					go p.ReplicaSet.Restart()
-				}
-				return
+
+		err = p.proxyMessage(h, c, serverConn)
+		if err != nil {
+			p.serverPool.Discard(serverConn)
+			p.Log.Error(err)
+			stats.BumpSum(p.stats, "message.proxy.error", 1)
+			if ne, ok := err.(net.Error); ok && ne.Timeout() {
+				stats.BumpSum(p.stats, "message.proxy.timeout", 1)
 			}
-
-			// One message was proxied, stop it's timer.
-			mpt.End()
-
-			if !h.OpCode.IsMutation() {
-				break
+			if err == errRSChanged {
+				go p.ReplicaSet.Restart()
 			}
-
-			// If the operation we just performed was a mutation, we always make the
-			// follow up request on the same server because it's possibly a getLastErr
-			// call which expects this behavior.
-
-			stats.BumpSum(p.stats, "message.with.mutation", 1)
-			h, err = p.gleClientReadHeader(c)
-			if err != nil {
-				// Client did not make _any_ query within the GetLastErrorTimeout.
-				// Return the server to the pool and wait go back to outer loop.
-				if err == errClientReadTimeout {
-					break
-				}
-				// Prevent noise of normal client disconnects, but log if anything else.
-				if err != errNormalClose {
-					p.Log.Error(err)
-				}
-				// We need to return our server to the pool (it's still good as far
-				// as we know).
-				p.serverPool.Release(serverConn)
-				return
-			}
-
-			// Successfully read message when waiting for the getLastError call.
-			mpt = stats.BumpTime(p.stats, "message.proxy.time")
+			return
 		}
+
+		// One message was proxied, stop it's timer.
+		mpt.End()
+
 		p.serverPool.Release(serverConn)
 		scht.End()
 		stats.BumpSum(p.stats, "message.proxy.success", 1)
@@ -345,14 +307,6 @@ func (p *Proxy) idleClientReadHeader(c net.Conn) (*messageHeader, error) {
 	h, err := p.clientReadHeader(c, p.ReplicaSet.ClientIdleTimeout)
 	if err == errClientReadTimeout {
 		stats.BumpSum(p.stats, "client.idle.timeout", 1)
-	}
-	return h, err
-}
-
-func (p *Proxy) gleClientReadHeader(c net.Conn) (*messageHeader, error) {
-	h, err := p.clientReadHeader(c, p.ReplicaSet.GetLastErrorTimeout)
-	if err == errClientReadTimeout {
-		stats.BumpSum(p.stats, "client.gle.timeout", 1)
 	}
 	return h, err
 }

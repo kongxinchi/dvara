@@ -10,7 +10,6 @@ type Conf struct {
 	ClientIdleTimeout       uint        `yaml:"client_idle_timeout"`
 	ServerIdleTimeout       uint        `yaml:"server_idle_timeout"`
 	ServerClosePoolSize     uint        `yaml:"server_close_pool_size"`
-	GetLastErrorTimeout     uint        `yaml:"get_last_error_timeout"`
 	MaxPerClientConnections uint        `yaml:"max_per_client_connections"`
 	MaxConnections          uint        `yaml:"max_connections"`
 	ProxyConfigs            []ProxyConf `yaml:"proxies"`

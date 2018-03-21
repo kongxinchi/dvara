@@ -6,12 +6,10 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"strings"
 
 	"github.com/davecgh/go-spew/spew"
 	"gopkg.in/mgo.v2/bson"
-	"github.com/op/go-logging"
 )
 
 var (
@@ -28,7 +26,6 @@ var (
 // ProxyQuery proxies an OpQuery and a corresponding response.
 type ProxyQuery struct {
 	Log                              Logger                            `inject:""`
-	GetLastErrorRewriter             *GetLastErrorRewriter             `inject:""`
 	IsMasterResponseRewriter         *IsMasterResponseRewriter         `inject:""`
 	ReplSetGetStatusResponseRewriter *ReplSetGetStatusResponseRewriter `inject:""`
 }
@@ -38,14 +35,7 @@ func (p *ProxyQuery) Proxy(
 	h *messageHeader,
 	client io.ReadWriter,
 	server io.ReadWriter,
-	lastError *LastError,
 ) error {
-
-	// https://github.com/mongodb/mongo/search?q=lastError.disableForCommand
-	// Shows the logic we need to be in sync with. Unfortunately it isn't a
-	// simple check to determine this, and may change underneath us at the mongo
-	// layer.
-	resetLastError := true
 
 	parts := [][]byte{h.ToWire()}
 
@@ -64,7 +54,7 @@ func (p *ProxyQuery) Proxy(
 	parts = append(parts, fullCollectionName)
 
 	var rewriter responseRewriter
-	if *proxyAllQueries || bytes.HasSuffix(fullCollectionName, cmdCollectionSuffix) {
+	if *proxyAllQueries || bytes.HasSuffix(fullCollectionName, adminCollectionName) {
 		var twoInt32 [8]byte
 		if _, err := io.ReadFull(client, twoInt32[:]); err != nil {
 			p.Log.Error(err)
@@ -85,41 +75,18 @@ func (p *ProxyQuery) Proxy(
 			return err
 		}
 
-		if p.Log.IsEnabledFor(logging.DEBUG) {
-			p.Log.Debugf(
-				"buffered OpQuery for %s: \n%s",
-				fullCollectionName[:len(fullCollectionName)-1],
-				spew.Sdump(q),
-			)
-		}
-
-		if hasKey(q, "getLastError") {
-			return p.GetLastErrorRewriter.Rewrite(
-				h,
-				parts,
-				client,
-				server,
-				lastError,
-			)
-		}
+		p.Log.Debugf(
+			"buffered OpQuery for %s: \n%s",
+			fullCollectionName[:len(fullCollectionName)-1],
+			spew.Sdump(q),
+		)
 
 		if hasKey(q, "isMaster") {
 			rewriter = p.IsMasterResponseRewriter
 		}
-		if bytes.Equal(adminCollectionName, fullCollectionName) && hasKey(q, "replSetGetStatus") {
+		if hasKey(q, "replSetGetStatus") {
 			rewriter = p.ReplSetGetStatusResponseRewriter
 		}
-
-		if rewriter != nil {
-			// If forShell is specified, we don't want to reset the last error. See
-			// comment above around resetLastError for details.
-			resetLastError = hasKey(q, "forShell")
-		}
-	}
-
-	if resetLastError && lastError.Exists() {
-		p.Log.Debug("reset getLastError cache")
-		lastError.Reset()
 	}
 
 	written, err := server.Write(bytes.Join(parts, []byte("")))
@@ -143,92 +110,6 @@ func (p *ProxyQuery) Proxy(
 
 	if err := copyMessage(client, server); err != nil {
 		p.Log.Error(err)
-		return err
-	}
-
-	return nil
-}
-
-// LastError holds the last known error.
-type LastError struct {
-	header *messageHeader
-	rest   bytes.Buffer
-}
-
-// Exists returns true if this instance contains a cached error.
-func (l *LastError) Exists() bool {
-	return l.header != nil
-}
-
-// Reset resets the stored error clearing it.
-func (l *LastError) Reset() {
-	l.header = nil
-	l.rest.Reset()
-}
-
-// GetLastErrorRewriter handles getLastError requests and proxies, caches or
-// sends cached responses as necessary.
-type GetLastErrorRewriter struct {
-	Log Logger `inject:""`
-}
-
-// Rewrite handles getLastError requests.
-func (r *GetLastErrorRewriter) Rewrite(
-	h *messageHeader,
-	parts [][]byte,
-	client io.ReadWriter,
-	server io.ReadWriter,
-	lastError *LastError,
-) error {
-
-	if !lastError.Exists() {
-		// We're going to be performing a real getLastError query and caching the
-		// response.
-		written, err := server.Write(bytes.Join(parts, []byte("")))
-		if err != nil {
-			r.Log.Error(err)
-			return err
-		}
-
-		pending := int64(h.MessageLength) - int64(written)
-		if _, err := io.CopyN(server, client, pending); err != nil {
-			r.Log.Error(err)
-			return err
-		}
-
-		if lastError.header, err = readHeader(server); err != nil {
-			r.Log.Error(err)
-			return err
-		}
-		pending = int64(lastError.header.MessageLength - headerLen)
-		if _, err = io.CopyN(&lastError.rest, server, pending); err != nil {
-			r.Log.Error(err)
-			return err
-		}
-		r.Log.Debugf("caching new getLastError response: %s", lastError.rest.Bytes())
-	} else {
-		// We need to discard the pending bytes from the client from the query
-		// before we send it our cached response.
-		var written int
-		for _, b := range parts {
-			written += len(b)
-		}
-		pending := int64(h.MessageLength) - int64(written)
-		if _, err := io.CopyN(ioutil.Discard, client, pending); err != nil {
-			r.Log.Error(err)
-			return err
-		}
-		// Modify and send the cached response for this request.
-		lastError.header.ResponseTo = h.RequestID
-		r.Log.Debugf("using cached getLastError response: %s", lastError.rest.Bytes())
-	}
-
-	if err := lastError.header.WriteTo(client); err != nil {
-		r.Log.Error(err)
-		return err
-	}
-	if _, err := client.Write(lastError.rest.Bytes()); err != nil {
-		r.Log.Error(err)
 		return err
 	}
 

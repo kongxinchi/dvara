@@ -62,7 +62,6 @@ func Main() error {
 		ClientIdleTimeout:       time.Duration(conf.ClientIdleTimeout) * time.Second,
 		ServerIdleTimeout:       time.Duration(conf.ServerIdleTimeout) * time.Second,
 		ServerClosePoolSize:     conf.ServerClosePoolSize,
-		GetLastErrorTimeout:     time.Duration(conf.GetLastErrorTimeout) * time.Second,
 		MaxConnections:          conf.MaxConnections,
 		MaxPerClientConnections: conf.MaxPerClientConnections,
 	}

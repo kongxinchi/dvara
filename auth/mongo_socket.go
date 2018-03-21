@@ -30,7 +30,6 @@ import (
 	"net"
 	"gopkg.in/mgo.v2/bson"
 	"github.com/davecgh/go-spew/spew"
-	"github.com/op/go-logging"
 )
 
 type replyFunc func(err error, reply *replyOp, docNum int, docData []byte)
@@ -125,14 +124,12 @@ func (socket *MongoSocket) Query(op *queryOp) (err error) {
 				return
 			}
 
-			if socket.Log.IsEnabledFor(logging.DEBUG) {
-				m := bson.M{}
-				if err := bson.Unmarshal(b, m); err == nil {
-					socket.Log.Debugf(
-						"Socket %p to %s: received document: \n%s",
-						socket, socket.Addr, spew.Sdump(m),
-					)
-				}
+			m := bson.M{}
+			if err := bson.Unmarshal(b, m); err == nil {
+				socket.Log.Debugf(
+					"Socket %p to %s: received document: \n%s",
+					socket, socket.Addr, spew.Sdump(m),
+				)
 			}
 
 			if replyFunc != nil {
