@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/facebookgo/stackerr"
-	"github.com/op/go-logging"
 )
 
 var hardRestart = flag.Bool(
@@ -30,7 +29,6 @@ type Logger interface {
 	Infof(format string, args ...interface{})
 	Debug(args ...interface{})
 	Debugf(format string, args ...interface{})
-	IsEnabledFor(level logging.Level) bool
 }
 
 var errNoAddrsGiven = errors.New("dvara: no seed addresses given for ReplicaSet")

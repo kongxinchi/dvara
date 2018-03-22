@@ -37,36 +37,48 @@ func (p *ProxyQuery) Proxy(
 	server io.ReadWriter,
 ) error {
 
+	// MsgHeader int32 x 4
+	readLength := 16
 	parts := [][]byte{h.ToWire()}
 
+	// ZERO int32
 	var flags [4]byte
 	if _, err := io.ReadFull(client, flags[:]); err != nil {
 		p.Log.Error(err)
 		return err
 	}
+	readLength += 4
 	parts = append(parts, flags[:])
 
+	// fullCollectionName cstring
 	fullCollectionName, err := readCString(client)
 	if err != nil {
 		p.Log.Error(err)
 		return err
 	}
+	readLength += len(fullCollectionName)
 	parts = append(parts, fullCollectionName)
 
 	var rewriter responseRewriter
+
 	if *proxyAllQueries || bytes.HasSuffix(fullCollectionName, adminCollectionName) {
+
+		// numberToSkip + numberToReturn, int32 x 2
 		var twoInt32 [8]byte
 		if _, err := io.ReadFull(client, twoInt32[:]); err != nil {
 			p.Log.Error(err)
 			return err
 		}
+		readLength += len(twoInt32)
 		parts = append(parts, twoInt32[:])
 
+		// query document
 		queryDoc, err := readDocument(client)
 		if err != nil {
 			p.Log.Error(err)
 			return err
 		}
+		readLength += len(queryDoc)
 		parts = append(parts, queryDoc)
 
 		var q bson.D
@@ -89,14 +101,18 @@ func (p *ProxyQuery) Proxy(
 		}
 	}
 
-	written, err := server.Write(bytes.Join(parts, []byte("")))
-	if err != nil {
-		p.Log.Error(err)
-		return err
+	pending := int64(h.MessageLength) - int64(readLength)
+	if pending > 0 {
+		lastBytes := make([]byte, pending)
+		if _, err := io.ReadFull(client, lastBytes[:]); err != nil {
+			p.Log.Error(err)
+			return err
+		}
+		parts = append(parts, lastBytes[:])
 	}
 
-	pending := int64(h.MessageLength) - int64(written)
-	if _, err := io.CopyN(server, client, pending); err != nil {
+	_, err = server.Write(bytes.Join(parts, []byte("")))
+	if err != nil {
 		p.Log.Error(err)
 		return err
 	}
