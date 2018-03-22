@@ -27,7 +27,6 @@ var (
 type ProxyQuery struct {
 	Log                              Logger                            `inject:""`
 	IsMasterResponseRewriter         *IsMasterResponseRewriter         `inject:""`
-	ReplSetGetStatusResponseRewriter *ReplSetGetStatusResponseRewriter `inject:""`
 }
 
 // Proxy proxies an OpQuery and a corresponding response.
@@ -95,9 +94,6 @@ func (p *ProxyQuery) Proxy(
 
 		if hasKey(q, "isMaster") {
 			rewriter = p.IsMasterResponseRewriter
-		}
-		if hasKey(q, "replSetGetStatus") {
-			rewriter = p.ReplSetGetStatusResponseRewriter
 		}
 	}
 
@@ -256,48 +252,6 @@ func (r *IsMasterResponseRewriter) Rewrite(client io.Writer, server io.Reader) e
 			return err
 		}
 	}
-	return r.ReplyRW.WriteOne(client, h, prefix, docLen, q)
-}
-
-type statusMember struct {
-	Name  string       `bson:"name"`
-	State ReplicaState `bson:"stateStr,omitempty"`
-	Self  bool         `bson:"self,omitempty"`
-	Extra bson.M       `bson:",inline"`
-}
-
-type replSetGetStatusResponse struct {
-	Name    string                 `bson:"set,omitempty"`
-	Members []statusMember         `bson:"members"`
-	Extra   map[string]interface{} `bson:",inline"`
-}
-
-// ReplSetGetStatusResponseRewriter rewrites the "replSetGetStatus" response.
-type ReplSetGetStatusResponseRewriter struct {
-	Log         Logger      `inject:""`
-	ProxyMapper ProxyMapper `inject:""`
-	ReplyRW     *ReplyRW    `inject:""`
-}
-
-// Rewrite rewrites the "replSetGetStatus" response.
-func (r *ReplSetGetStatusResponseRewriter) Rewrite(client io.Writer, server io.Reader) error {
-	var err error
-	var q replSetGetStatusResponse
-	h, prefix, docLen, err := r.ReplyRW.ReadOne(server, &q)
-	if err != nil {
-		return err
-	}
-
-	var newMembers []statusMember
-	for _, m := range q.Members {
-		newH, err := r.ProxyMapper.Proxy(m.Name)
-		if err != nil {
-			return err
-		}
-		m.Name = newH
-		newMembers = append(newMembers, m)
-	}
-	q.Members = newMembers
 	return r.ReplyRW.WriteOne(client, h, prefix, docLen, q)
 }
 
