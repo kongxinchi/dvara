@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"bytes"
+	"gopkg.in/mgo.v2/bson"
 )
 
 var (
@@ -123,33 +125,115 @@ func (m *messageHeader) String() string {
 	)
 }
 
-func readHeader(r io.Reader) (*messageHeader, error) {
-	var d [headerLen]byte
-	b := d[:]
-	if _, err := io.ReadFull(r, b); err != nil {
-		return nil, err
-	}
-	h := messageHeader{}
-	h.FromWire(b)
-	return &h, nil
+type requestMessage struct {
+	header                *messageHeader
+	fullCollectionNameLen int32
+	bytes                 []byte
 }
 
-// copyMessage copies reads & writes an entire message.
-func copyMessage(w io.Writer, r io.Reader) error {
-	h, err := readHeader(r)
+func (r *requestMessage) getHeader() *messageHeader {
+	if r.header == nil {
+		h := messageHeader{}
+		h.FromWire(r.bytes[0:headerLen])
+		r.header = &h
+	}
+	return r.header
+}
+
+func (r *requestMessage) setRequestId(rId int32) {
+	setInt32(r.bytes, 4, rId)
+	if r.header != nil {
+		r.header.RequestID = rId
+	}
+}
+
+func (r *requestMessage) fullCollectionName() []byte {
+	if r.fullCollectionNameLen == 0 {
+		header := r.getHeader()
+		var i int32
+		for i = 20; i < header.MessageLength; i ++ {
+			if r.bytes[i] == x00 {
+				r.fullCollectionNameLen = i + 1 - 20
+				break
+			}
+		}
+		if r.fullCollectionNameLen == 0 {
+			return nil
+		}
+	}
+	return r.bytes[20:r.fullCollectionNameLen+20]
+}
+
+func (r *requestMessage) readQueryBSON(v interface{}) error {
+	if r.fullCollectionNameLen == 0 {
+		r.fullCollectionName()
+	}
+
+	offset := 20 + r.fullCollectionNameLen + 8
+	size := getInt32(r.bytes, int(offset))
+	doc := r.bytes[offset : offset + size]
+
+	if err := bson.Unmarshal(doc, v); err != nil {
+		return err
+	}
+	return nil
+}
+
+type responseMessage struct {
+	header                *messageHeader
+	bytes                 []byte
+}
+
+func (r *responseMessage) getHeader() *messageHeader {
+	if r.header == nil {
+		h := messageHeader{}
+		h.FromWire(r.bytes[0:headerLen])
+		r.header = &h
+	}
+	return r.header
+}
+
+func (r *responseMessage) setResponseTo(rId int32) {
+	setInt32(r.bytes, 8, rId)
+	if r.header != nil {
+		r.header.ResponseTo = rId
+	}
+}
+
+func (r *responseMessage) readDocumentBSON(v interface{}) error {
+
+	offset := headerLen + 20
+	size := getInt32(r.bytes, int(offset))
+	doc := r.bytes[offset : int32(offset) + size]
+
+	if err := bson.Unmarshal(doc, v); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (r *responseMessage) updateDocument(v interface{}) error {
+
+	newDoc, err := bson.Marshal(v)
 	if err != nil {
 		return err
 	}
-	if err := h.WriteTo(w); err != nil {
-		return err
+
+	newLength := headerLen + 20 + int32(len(newDoc))
+	setInt32(r.bytes, 0, newLength)
+	if r.header != nil {
+		r.header.MessageLength = newLength
 	}
-	_, err = io.CopyN(w, r, int64(h.MessageLength-headerLen))
-	return err
+
+	r.bytes = mergeBytes(r.bytes[0: headerLen+20], newDoc)
+	return nil
 }
 
-// readDocument read an entire BSON document. This document can be used with
-// bson.Unmarshal.
-func readDocument(r io.Reader) ([]byte, error) {
+func mergeBytes(pBytes ...[]byte) []byte {
+	return bytes.Join(pBytes, []byte(""))
+}
+
+func readMessageBytes(r io.Reader) ([]byte, error) {
 	var sizeRaw [4]byte
 	if _, err := io.ReadFull(r, sizeRaw[:]); err != nil {
 		return nil, err
@@ -163,23 +247,25 @@ func readDocument(r io.Reader) ([]byte, error) {
 	return doc, nil
 }
 
-const x00 = byte(0)
-
-// readCString reads a null turminated string as defined by BSON from the
-// reader. Note, the return value includes the trailing null byte.
-func readCString(r io.Reader) ([]byte, error) {
-	var b []byte
-	var n [1]byte
-	for {
-		if _, err := io.ReadFull(r, n[:]); err != nil {
-			return nil, err
-		}
-		b = append(b, n[0])
-		if n[0] == x00 {
-			return b, nil
-		}
+func readRequestMessage(r io.Reader) (*requestMessage, error) {
+	raw, err := readMessageBytes(r)
+	if err != nil {
+		return nil, err
 	}
+	msg := requestMessage{bytes: raw}
+	return &msg, nil
 }
+
+func readResponseMessage(r io.Reader) (*responseMessage, error) {
+	raw, err := readMessageBytes(r)
+	if err != nil {
+		return nil, err
+	}
+	msg := responseMessage{bytes: raw}
+	return &msg, nil
+}
+
+const x00 = byte(0)
 
 // all data in the MongoDB wire protocol is little-endian.
 // all the read/write functions below are little-endian.

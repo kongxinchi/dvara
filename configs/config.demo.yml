@@ -1,0 +1,52 @@
+
+# timeout for one message to be proxied
+message_timeout: 120
+
+# idle timeout for client connections
+client_idle_timeout: 3600
+
+# maximum number of connections per client
+max_per_client_connections: 256
+
+# maximum number of mongo server connections per proxy
+max_server_connections: 16
+
+# maximum number of waiting responses per server connections
+max_response_wait: 16
+
+# print request document if debug set as true
+debug: true
+
+# deployment environment
+deployment: develop
+
+# for which app
+app: vaapps
+
+# log configs
+log:
+  outputPaths: [dvara.log]
+  encoding: json
+  level: INFO
+
+# proxies mappings
+proxies:
+  -
+    listen: 127.0.0.1:27017
+    server: 192.168.33.10:27017
+    username:
+    password:
+#  -
+#    listen: 127.0.0.1:57000
+#    server: 192.168.100.10:57000
+#    username: 17zuoye-user-ld
+#    password: office.17zuoye.2016
+#  -
+#    listen: 127.0.0.1:6001
+#    server: 10.6.2.12:50801
+#    username:
+#    password:
+
+influxdb:
+  server: http://10.0.1.224:8086
+  db: gaia.test

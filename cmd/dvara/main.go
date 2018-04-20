@@ -4,57 +4,121 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"os/signal"
-	"syscall"
 	"time"
 
 	"github.com/kongxinchi/dvara"
 	"github.com/facebookgo/inject"
 	"github.com/facebookgo/startstop"
-	"github.com/facebookgo/stats"
+	"github.com/sevlyar/go-daemon"
+	"syscall"
+	"path/filepath"
 )
 
+var (
+	signal = flag.String("s", "", `send signal to the daemon stop — graceful shutdown`)
+	configPath = flag.String("config", "", "config file path")
+)
+
+func waitChildExit(child *os.Process, reborn chan bool) {
+	ps, err := child.Wait()
+	if err != nil {
+		fmt.Println("child exit unexpected:", err)
+		reborn <- true
+	}
+	if !ps.Success() {
+		fmt.Println("child exit unexpected:", ps)
+		reborn <- true
+	}
+	reborn <- false
+}
+
 func main() {
-	if err := Main(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+	flag.Parse()
+	daemon.AddCommand(daemon.StringFlag(signal, "stop"), syscall.SIGTERM, termHandler)
+
+	dir, _ := filepath.Abs(filepath.Dir(os.Args[0]))
+	
+	context := &daemon.Context{
+		PidFileName: filepath.Join(dir, "run.pid"),
+		PidFilePerm: 0644,
+		LogFileName: filepath.Join(dir, "run.log"),
+		LogFilePerm: 060,
+		WorkDir:     "./",
+		Umask:       027,
+		//Args:        []string{"-config", *configPath},
+	}
+
+	if len(daemon.ActiveFlags()) > 0 {
+		d, err := context.Search()
+		if err != nil {
+			fmt.Println("Unable send signal to the daemon:", err)
+		}
+		daemon.SendCommands(d)
+		for {
+			err := d.Signal(syscall.Signal(0))
+			if err != nil {
+				break
+			}
+			fmt.Printf("waiting %d exit...\n", d.Pid)
+			time.Sleep(time.Second)
+		}
+		return
+	}
+
+	child, err := context.Reborn()
+	if err != nil {
+		fmt.Printf("Unable to run: %s\n", err)
+	}
+
+	if child != nil {
+		// supervisor in parent process
+		reborn := make(chan bool)
+
+		go waitChildExit(child, reborn)
+
+		for v := range reborn {
+			if !v {
+				break
+			}
+			child, _ = context.Reborn()
+			go waitChildExit(child, reborn)
+		}
+
+	} else {
+
+		defer context.Release()
+
+		if err := Main(); err != nil {
+			fmt.Println(os.Stderr, err)
+			os.Exit(1)
+		}
+		os.Exit(0)
 	}
 }
 
 func Main() error {
-	messageTimeout := flag.Duration("message_timeout", 2*time.Minute, "timeout for one message to be proxied")
-	clientIdleTimeout := flag.Duration("client_idle_timeout", 60*time.Minute, "idle timeout for client connections")
-	serverIdleTimeout := flag.Duration("server_idle_timeout", 1*time.Hour, "idle timeout for  server connections")
-	serverClosePoolSize := flag.Uint("server_close_pool_size", 100, "number of goroutines that will handle closing server connections")
-	getLastErrorTimeout := flag.Duration("get_last_error_timeout", time.Minute, "timeout for getLastError pinning")
-	maxPerClientConnections := flag.Uint("max_per_client_connections", 100, "maximum number of connections per client")
-	maxConnections := flag.Uint("max_connections", 100, "maximum number of connections per mongo")
-	portStart := flag.Int("port_start", 6000, "start of port range")
-	portEnd := flag.Int("port_end", 6010, "end of port range")
-	addrs := flag.String("addrs", "localhost:27017", "comma separated list of mongo addresses")
 
-	flag.Parse()
-
-	replicaSet := dvara.ReplicaSet{
-		Addrs:                   *addrs,
-		PortStart:               *portStart,
-		PortEnd:                 *portEnd,
-		MessageTimeout:          *messageTimeout,
-		ClientIdleTimeout:       *clientIdleTimeout,
-		ServerIdleTimeout:       *serverIdleTimeout,
-		ServerClosePoolSize:     *serverClosePoolSize,
-		GetLastErrorTimeout:     *getLastErrorTimeout,
-		MaxConnections:          *maxConnections,
-		MaxPerClientConnections: *maxPerClientConnections,
+	conf, err := dvara.InitConf(*configPath)
+	if err != nil {
+		fmt.Printf("Unable load config: %s\n", err)
 	}
 
-	var statsClient stats.HookClient
-	var log stdLogger
+	logger := dvara.InitLogger(conf)
+
+	proxyManager := &dvara.ProxyManager{
+		ProxyConfigs:            conf.ProxyConfigs,
+		MessageTimeout:          time.Duration(conf.MessageTimeout) * time.Second,
+		ClientIdleTimeout:       time.Duration(conf.ClientIdleTimeout) * time.Second,
+		MaxPerClientConnections: conf.MaxPerClientConnections,
+		MaxServerConnections:    int32(conf.MaxServerConnections),
+		MaxResponseWait:         int32(conf.MaxResponseWait),
+		Debug:                   conf.Debug,
+	}
+
 	var graph inject.Graph
-	err := graph.Provide(
-		&inject.Object{Value: &log},
-		&inject.Object{Value: &replicaSet},
-		&inject.Object{Value: &statsClient},
+	err = graph.Provide(
+		&inject.Object{Value: logger},
+		&inject.Object{Value: proxyManager},
 	)
 	if err != nil {
 		return err
@@ -64,14 +128,20 @@ func Main() error {
 	}
 	objects := graph.Objects()
 
-	if err := startstop.Start(objects, &log); err != nil {
+	if err := startstop.Start(objects, logger); err != nil {
 		return err
 	}
-	defer startstop.Stop(objects, &log)
+	defer startstop.Stop(objects, logger)
 
-	ch := make(chan os.Signal, 2)
-	signal.Notify(ch, syscall.SIGTERM, syscall.SIGINT)
-	<-ch
-	signal.Stop(ch)
+	go proxyManager.HttpProfListen()
+
+	err = daemon.ServeSignals()
+	if err != nil {
+		return err
+	}
 	return nil
+}
+
+func termHandler(sig os.Signal) error {
+	return daemon.ErrStop
 }
